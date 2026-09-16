@@ -735,6 +735,7 @@ func makeRules(filePath string, isRemote bool, gitHubToken string, localActions 
 		NewCacheBloatRule(),                    // Detects cache bloat risk with cache/restore and cache/save
 		NewAIActionUnrestrictedTriggerRule(),   // Detects AI actions with unrestricted user access (Clinejection attack pattern)
 		NewAIActionExcessiveToolsRule(),        // Detects AI actions with dangerous tools in untrusted triggers (Clinejection attack pattern)
+		NewAIActionUnboundedToolPatternRule(),  // Detects AI actions granting mutating commands that match any target (Clinejection attack pattern)
 		NewAIActionPromptInjectionRule(),       // Detects untrusted input in AI agent prompt parameters (prompt injection, Clinejection attack pattern)
 		NewAIActionUnsafeSandboxRule(),         // Detects unsafe sandbox settings in AI agent actions
 		NewAIActionExecutionOrderRule(),        // Detects AI agent actions that are not the last step in a job

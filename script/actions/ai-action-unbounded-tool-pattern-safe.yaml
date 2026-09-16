@@ -1,0 +1,19 @@
+name: Safe AI Issue Triage
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          allowed_non_write_users: ${{ github.event.issue.user.login }}
+          # Bounded: every mutating pattern names the triggering issue, so a
+          # steered agent cannot be redirected to another one.
+          claude_args: --allowedTools "Read,Bash(gh issue comment ${{ github.event.issue.number }}:*),Bash(gh issue edit ${{ github.event.issue.number }} --add-label:*),Bash(gh issue view:*)"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
