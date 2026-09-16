@@ -116,10 +116,23 @@ The rule performs two-phase detection:
    so the two rules cannot disagree about what "untrusted" means.
 2. **Step-level**: extracts each `Bash(...)` entry from `claude_args`, strips the
    trailing `:*` wildcard to obtain the permitted prefix, and reports the entry
-   when the prefix stops at a mutating command with no argument after it.
+   when the prefix stops at a mutating command with no target named.
 
-An entry that names an argument — a literal number, a branch, or an expression
-such as `${{ github.event.issue.number }}` — is not reported.
+Whether a target *is* named is command-aware, because the position of the target
+differs between commands:
+
+| pattern | why |
+|---|---|
+| `Bash(gh issue edit:*)` | no argument at all |
+| `Bash(gh issue comment --body:*)` | the first argument is a flag, so no issue is named |
+| `Bash(gh api --method POST:*)` | the first argument is a flag, so no endpoint is named |
+| `Bash(git push origin:*)` | `origin` is the *remote*; the refspec is still open |
+| `Bash(gh issue edit 1234:*)` | bounded — the target is the first argument |
+| `Bash(gh api repos/o/r/issues/1:*)` | bounded — the endpoint is the first argument |
+| `Bash(git push origin fix/issue-1:*)` | bounded — both remote and refspec are named |
+
+The presence of an argument is not enough on its own, which is the distinction
+this rule has to make to be useful.
 
 ### Remediation Steps
 
@@ -167,8 +180,12 @@ such as `${{ github.event.issue.number }}` — is not reported.
 ```yaml
 claude_args: --allowedTools "Read,Bash(gh issue edit:*)"
 claude_args: --allowedTools "Read,Bash(gh issue comment:*),Bash(gh pr comment:*)"
-claude_args: --allowedTools "Read,Bash(git push:*)"
 claude_args: --allowedTools "Read,Bash(gh api:*)"
+claude_args: --allowedTools "Read,Bash(gh api --method POST:*)"
+claude_args: --allowedTools "Read,Bash(gh issue comment --body:*)"
+claude_args: --allowedTools "Read,Bash(gh pr review:*)"
+claude_args: --allowedTools "Read,Bash(git push:*)"
+claude_args: --allowedTools "Read,Bash(git push origin:*)"
 ```
 
 #### Safe Patterns (Not Flagged)
@@ -180,8 +197,11 @@ claude_args: --allowedTools "Read,Bash(gh issue edit ${{ github.event.issue.numb
 # target named literally
 claude_args: --allowedTools "Read,Bash(gh issue edit 1234:*)"
 
-# branch named
+# remote and refspec both named
 claude_args: --allowedTools "Read,Bash(git push origin fix/issue-1:*)"
+
+# endpoint named
+claude_args: --allowedTools "Read,Bash(gh api repos/o/r/issues/1:*)"
 
 # read-only
 claude_args: --allowedTools "Read,Glob,Grep,Bash(gh issue view:*)"

@@ -23,12 +23,51 @@ var aiBashToolEntryPattern = regexp.MustCompile(`Bash\(([^)]*)\)`)
 // aiMutatingCommandPattern はリポジトリを変更するコマンドを
 // 「コマンド本体」と「それに続く引数」に分解する。
 //
-// 2 番目のキャプチャが空なら、許可はコマンド本体で止まっており対象は限定されていない。
-// 引数があれば（issue 番号、ブランチ名など）対象は限定されている。
+// 対象が限定されているかどうかは、コマンド種別ごとに aiTargetIsBounded が判断する。
+// 引数が「ある」ことだけでは限定にならない:
+//
+//	git push origin:*      -> origin はリモートであり、ref は指定されていない
+//	gh api --method POST:* -> --method はフラグであり、endpoint は指定されていない
 var aiMutatingCommandPattern = regexp.MustCompile(
 	`^(gh\s+(?:issue|pr|label|release|workflow|repo|run)\s+` +
-		`(?:comment|edit|close|reopen|merge|delete|create|add|remove|transfer|lock)` +
+		`(?:comment|edit|close|reopen|merge|delete|create|add|remove|transfer|` +
+		`lock|unlock|pin|unpin|review|ready|clone|upload)` +
 		`|gh\s+api|git\s+push)(\s+.*)?$`)
+
+// aiTargetIsBounded は、許可プレフィックスが対象を名指ししているかを判定する。
+//
+// 引数の有無だけでは決まらない。コマンドごとに「対象」が何番目のトークンかを
+// 知る必要がある:
+//
+//	gh issue edit 1234           先頭が対象        -> 限定
+//	gh issue comment --body x    先頭がフラグ      -> 限定されていない（issue は任意）
+//	gh api repos/o/r/issues/1    endpoint が先頭   -> 限定
+//	gh api --method POST         先頭がフラグ      -> 限定されていない（endpoint は任意）
+//	git push origin main         リモート + ref    -> 限定
+//	git push origin              リモートのみ      -> 限定されていない（ref は任意）
+func aiTargetIsBounded(command, rest string) bool {
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		// 引数がまったく無い場合は、必ず対象が残っている。
+		return false
+	}
+
+	if strings.HasPrefix(command, "git push") {
+		// refspec が名指しされていなければ、エージェントは任意の ref を push できる。
+		// リモートだけの指定（git push origin）は限定にならない。
+		positional := 0
+		for _, field := range fields {
+			if !strings.HasPrefix(field, "-") {
+				positional++
+			}
+		}
+		return positional >= 2
+	}
+
+	// gh のコマンドは `gh <group> <verb> <target> [flags]` の形で、
+	// `gh api` も endpoint が先頭に来る。先頭がフラグなら、対象は名指しされていない。
+	return !strings.HasPrefix(fields[0], "-")
+}
 
 // AIActionUnboundedToolPatternRule は、信頼されていないトリガーのワークフローで
 // AI エージェントに「対象を限定しない」変更コマンドを許可しているパターンを検出するルール。
@@ -150,8 +189,8 @@ func findUnboundedMutatingCommands(claudeArgs string) []string {
 			continue
 		}
 
-		// コマンド本体の後に引数があれば、対象は限定されている。
-		if strings.TrimSpace(match[2]) != "" {
+		// 対象が名指しされていれば、その許可は限定されている。
+		if aiTargetIsBounded(strings.Join(strings.Fields(match[1]), " "), match[2]) {
 			continue
 		}
 

@@ -212,3 +212,135 @@ jobs:
 		t.Errorf("expected the command to be reported once, got %d", n)
 	}
 }
+
+func TestAIActionUnboundedToolPattern_FlagOrRemoteAloneIsNotATarget(t *testing.T) {
+	t.Parallel()
+
+	// From review: "has an argument" is not "names a target".
+	//
+	//	git push origin          the argument is the *remote*; the refspec is
+	//	                         still the agent's to choose
+	//	gh api --method POST     the argument is a *flag*; the endpoint is open
+	//	gh issue comment --body  the flag comes first, so no issue is named
+	for name, allow := range map[string]string{
+		"git push remote only": "Read,Bash(git push origin:*)",
+		"gh api flag only":     "Read,Bash(gh api --method POST:*)",
+		"gh issue flag first":  "Read,Bash(gh issue comment --body:*)",
+		"no argument at all":   "Read,Bash(gh issue edit:*)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: --allowedTools "` + allow + `"
+`
+			if ruleErrors := runUnboundedToolPatternRule(t, workflow); len(ruleErrors) == 0 {
+				t.Fatalf("expected an error for %q, got none", allow)
+			}
+		})
+	}
+}
+
+func TestAIActionUnboundedToolPattern_NamedTargetForTheSameCommandsIsAllowed(t *testing.T) {
+	t.Parallel()
+
+	// The other half of the test above: once the target is named, the same
+	// commands are bounded and must not be reported.
+	for name, allow := range map[string]string{
+		"git push with ref":        "Read,Bash(git push origin main:*)",
+		"git push with branch":     "Read,Bash(git push origin fix/issue-1:*)",
+		"gh api with endpoint":     "Read,Bash(gh api repos/o/r/issues/1:*)",
+		"gh issue with number":     "Read,Bash(gh issue comment 1234 --body:*)",
+		"gh pr review with number": "Read,Bash(gh pr review 42 --approve:*)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: --allowedTools "` + allow + `"
+`
+			if ruleErrors := runUnboundedToolPatternRule(t, workflow); len(ruleErrors) != 0 {
+				t.Fatalf("expected no error for bounded pattern %q, got: %s", allow, ruleErrors[0].Description)
+			}
+		})
+	}
+}
+
+func TestAIActionUnboundedToolPattern_DetectsPRReview(t *testing.T) {
+	t.Parallel()
+
+	// From review: `review` was missing from the verb enumeration, so
+	// Bash(gh pr review:*) — which submits a review on any pull request — was
+	// not reported.
+	workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: --allowedTools "Read,Bash(gh pr review:*)"
+`
+	ruleErrors := runUnboundedToolPatternRule(t, workflow)
+
+	if len(ruleErrors) == 0 {
+		t.Fatal("expected an error for gh pr review, got none")
+	}
+	if !strings.Contains(ruleErrors[0].Description, "command(s) [gh pr review]") {
+		t.Errorf("expected the reported list to be [gh pr review], got: %s", ruleErrors[0].Description)
+	}
+}
+
+func TestAIActionUnboundedToolPattern_CoversTheMutatingSubcommands(t *testing.T) {
+	t.Parallel()
+
+	// The enumeration has to be complete, or a command that changes state slips
+	// through by being absent from a list. This asserts the whole set, so adding
+	// a subcommand to the pattern without intending to is visible.
+	for _, verb := range []string{
+		"comment", "edit", "close", "reopen", "merge", "delete", "create",
+		"add", "remove", "transfer", "lock", "unlock", "pin", "unpin",
+		"review", "ready", "clone", "upload",
+	} {
+		t.Run(verb, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: --allowedTools "Read,Bash(gh pr ` + verb + `:*)"
+`
+			if ruleErrors := runUnboundedToolPatternRule(t, workflow); len(ruleErrors) == 0 {
+				t.Fatalf("expected gh pr %s to be treated as mutating, got none", verb)
+			}
+		})
+	}
+}
