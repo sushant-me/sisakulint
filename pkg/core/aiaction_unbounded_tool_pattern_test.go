@@ -480,3 +480,38 @@ jobs:
 		})
 	}
 }
+
+func TestAIActionUnboundedToolPattern_SpaceWildcardGroupFormsAreDetected(t *testing.T) {
+	t.Parallel()
+
+	// The reference states `Bash(ls:*)` and `Bash(ls *)` are the same rule, and
+	// that `Bash(ls*)` is broader still. All three spellings must reach the same
+	// verdict, otherwise a group-wide grant written with a space is invisible.
+	for name, allow := range map[string]string{
+		"git space":      "Read,Bash(git *)",
+		"gh space":       "Read,Bash(gh *)",
+		"gh pr space":    "Read,Bash(gh pr *)",
+		"gh issue space": "Read,Bash(gh issue *)",
+		"git nospace":    "Read,Bash(git*)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: --allowedTools "` + allow + `"
+`
+			if ruleErrors := runUnboundedToolPatternRule(t, workflow); len(ruleErrors) == 0 {
+				t.Fatalf("space-wildcard grant %q was not reported", allow)
+			}
+		})
+	}
+}

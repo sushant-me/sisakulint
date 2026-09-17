@@ -203,9 +203,17 @@ func findUnboundedMutatingCommands(claudeArgs string) []string {
 			continue
 		}
 
-		// Claude Code のワイルドカード表記 `:*` を取り除き、許可されている
-		// プレフィックスそのものを得る。
-		prefix := strings.TrimSuffix(raw, ":*")
+		// ワイルドカード表記を取り除き、許可されているプレフィックスそのものを得る。
+		// Claude Code のドキュメントでは `Bash(ls:*)` と `Bash(ls *)` は同じ規則で
+		// あり、`Bash(ls*)` はさらに広い（`lsof` にも一致する）。
+		// 3 つとも同じプレフィックスとして扱う。
+		prefix := raw
+		for _, suffix := range []string{":*", " *", "*"} {
+			if strings.HasSuffix(prefix, suffix) {
+				prefix = strings.TrimSuffix(prefix, suffix)
+				break
+			}
+		}
 		prefix = strings.TrimSpace(prefix)
 
 		// グループ全体の許可は、動詞を名指ししていなくても変更系を含む。
