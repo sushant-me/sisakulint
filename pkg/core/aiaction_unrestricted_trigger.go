@@ -62,18 +62,50 @@ func (r *AIActionUnrestrictedTriggerRule) VisitStep(node *ast.Step) error {
 		return nil
 	}
 
-	// with.allowed_non_write_users が "*" かどうかを検査する
-	if val, exists := action.Inputs["allowed_non_write_users"]; exists {
-		if val != nil && val.Value != nil && strings.TrimSpace(val.Value.Value) == "*" {
+	// 書き込み権限を持たない任意のユーザーを許可する入力名を検査する。
+	//
+	// claude-code-action: allowed_non_write_users
+	// openai/codex-action: allow-users (別名であり、以前は検査していなかった)
+	//
+	// どちらも「カンマ区切りのユーザー名リスト、または '*' ですべてのユーザー」と
+	// 定義されているため、リストの要素に '*' が含まれていれば全ユーザーが
+	// トリガーできる。文字列全体が "*" である場合だけを見ると、
+	// "*,some-trusted-user" のような指定を取り逃がす。
+	for _, inputName := range aiUnrestrictedTriggerInputs {
+		val, exists := action.Inputs[inputName]
+		if !exists || val == nil || val.Value == nil {
+			continue
+		}
+
+		if aiAllowsEveryUser(val.Value.Value) {
 			r.Errorf(
 				node.Pos,
-				`action %q has "allowed_non_write_users: \"*\"" which allows any GitHub user to trigger AI agent execution with full tool access. Restrict to specific users or organization members.`,
+				`action %q sets %s to allow every GitHub user to trigger AI agent execution. Restrict to specific users or organization members.`,
 				action.Uses.Value,
+				inputName,
 			)
 		}
 	}
 
 	return nil
+}
+
+// aiUnrestrictedTriggerInputs は「任意のユーザーを許可する」入力の名前。
+// アクションごとに名前が異なるため、両方を検査する。
+var aiUnrestrictedTriggerInputs = []string{
+	"allowed_non_write_users", // anthropics/claude-code-action
+	"allow-users",             // openai/codex-action
+}
+
+// aiAllowsEveryUser は、カンマ区切りの許可リストが全ユーザーを許可するかを判定する。
+// 空文字列は「誰も追加で許可しない」であり、全ユーザー許可ではない。
+func aiAllowsEveryUser(value string) bool {
+	for _, entry := range strings.Split(value, ",") {
+		if strings.TrimSpace(entry) == "*" {
+			return true
+		}
+	}
+	return false
 }
 
 // isKnownAIActionPrefix は uses の値が既知の AI アクションプレフィックスに一致するかを確認する。

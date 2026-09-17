@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+func runUnrestrictedTriggerRule(t *testing.T, workflow string) []*LintingError {
+	t.Helper()
+
+	parsed, errs := Parse([]byte(workflow))
+	if len(errs) > 0 {
+		t.Fatalf("failed to parse workflow: %v", errs)
+	}
+
+	rule := NewAIActionUnrestrictedTriggerRule()
+	v := NewSyntaxTreeVisitor()
+	v.AddVisitor(rule)
+	if err := v.VisitTree(parsed); err != nil {
+		t.Fatalf("failed to visit tree: %v", err)
+	}
+
+	return rule.Errors()
+}
+
 func TestAIActionUnrestrictedTrigger_DetectsWildcard(t *testing.T) {
 	t.Parallel()
 	rule := NewAIActionUnrestrictedTriggerRule()
@@ -142,5 +160,90 @@ jobs:
 	ruleErrors := rule.Errors()
 	if len(ruleErrors) != 0 {
 		t.Fatalf("expected no errors for non-AI action, got %d", len(ruleErrors))
+	}
+}
+
+func TestAIActionUnrestrictedTrigger_StarAnywhereInTheList(t *testing.T) {
+	t.Parallel()
+
+	// The action definition: "Comma-separated list of usernames to allow without
+	// write permissions, or '*' to allow all users." A list that *contains* '*'
+	// therefore allows every user, but matching only the whole string missed it.
+	for name, value := range map[string]string{
+		"alone":                `"*"`,
+		"single quoted":        `'*'`,
+		"star then user":       `"*,some-trusted-user"`,
+		"user then star":       `"some-trusted-user,*"`,
+		"star with whitespace": `"* , some-trusted-user"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on: issues
+jobs:
+  j:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          allowed_non_write_users: ` + value + `
+`
+			result := runUnrestrictedTriggerRule(t, workflow)
+			if len(result) == 0 {
+				t.Fatalf("allowed_non_write_users: %s was not reported", value)
+			}
+		})
+	}
+}
+
+func TestAIActionUnrestrictedTrigger_CodexActionInputName(t *testing.T) {
+	t.Parallel()
+
+	// openai/codex-action is in this rule's prefix list, but its equivalent input
+	// is named `allow-users`, which the rule never read -- so a codex-action
+	// workflow allowing every user was not reported at all.
+	workflow := `
+on: issues
+jobs:
+  j:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: openai/codex-action@v1
+        with:
+          allow-users: "*"
+`
+	if len(runUnrestrictedTriggerRule(t, workflow)) == 0 {
+		t.Fatal("codex-action allow-users: \"*\" was not reported")
+	}
+}
+
+func TestAIActionUnrestrictedTrigger_RestrictedValuesAreNotReported(t *testing.T) {
+	t.Parallel()
+
+	// Guarding the widening: an empty value is "allow nobody extra", not "allow
+	// everyone", and a named list is the hardened form.
+	for name, value := range map[string]string{
+		"empty":        `""`,
+		"named list":   `"alice,bob"`,
+		"single named": `"alice"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on: issues
+jobs:
+  j:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          allowed_non_write_users: ` + value + `
+`
+			if result := runUnrestrictedTriggerRule(t, workflow); len(result) != 0 {
+				t.Fatalf("allowed_non_write_users: %s was reported: %s", value, result[0].Description)
+			}
+		})
 	}
 }
