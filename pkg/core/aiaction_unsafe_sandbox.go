@@ -9,6 +9,23 @@ import (
 // unsafeSandboxValues はサンドボックス保護を無効化する危険な safety-strategy の値。
 var unsafeSandboxValues = []string{
 	"unsafe",
+	"danger-full-access", // documented for the `sandbox` input, not this one; kept defensively
+}
+
+// sandboxModeInputKeys は Codex のサンドボックスモードを選択する入力キー名。
+//
+// codex-action の `sandbox` 入力は「workspace-write、read-only、danger-full-access の
+// いずれか」と定義されている。つまり danger-full-access はこの入力の値であり、
+// safety-strategy の値ではない。safety-strategy だけを検査していたため、
+// 実在しない組み合わせを検査し続ける一方で、実際に危険な設定を見落としていた。
+var sandboxModeInputKeys = []string{
+	"sandbox",
+	"sandbox-mode",
+	"sandbox_mode",
+}
+
+// unsafeSandboxModes はサンドボックスを無効化する sandbox 入力の値。
+var unsafeSandboxModes = []string{
 	"danger-full-access",
 }
 
@@ -73,6 +90,7 @@ func (r *AIActionUnsafeSandboxRule) VisitStep(node *ast.Step) error {
 	}
 
 	r.checkSafetyStrategy(node, action)
+	r.checkSandboxMode(node, action)
 	r.checkDangerouslySkipPermissions(node, action)
 
 	return nil
@@ -94,6 +112,30 @@ func (r *AIActionUnsafeSandboxRule) checkSafetyStrategy(node *ast.Step, action *
 					node.Pos,
 					`action %q has safety-strategy set to %q which disables sandbox protections. Use "drop-sudo", "unprivileged-user", or "read-only" instead.`,
 					action.Uses.Value,
+					input.Value.Value,
+				)
+				return
+			}
+		}
+	}
+}
+
+// checkSandboxMode は sandbox 入力がサンドボックスを無効化していないか検査する。
+func (r *AIActionUnsafeSandboxRule) checkSandboxMode(node *ast.Step, action *ast.ExecAction) {
+	for _, key := range sandboxModeInputKeys {
+		input, exists := action.Inputs[key]
+		if !exists || input == nil || input.Value == nil {
+			continue
+		}
+
+		val := strings.TrimSpace(strings.ToLower(input.Value.Value))
+		for _, unsafeVal := range unsafeSandboxModes {
+			if val == unsafeVal {
+				r.Errorf(
+					node.Pos,
+					`action %q has %s set to %q which gives Codex unrestricted access to the runner. Use "workspace-write" or "read-only" instead.`,
+					action.Uses.Value,
+					key,
 					input.Value.Value,
 				)
 				return

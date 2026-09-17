@@ -218,3 +218,72 @@ jobs:
 		t.Fatalf("expected no errors when safety-strategy is not set, got %d: %v", len(ruleErrors), ruleErrors)
 	}
 }
+
+func runUnsafeSandboxRule(t *testing.T, workflow string) []*LintingError {
+	t.Helper()
+
+	parsed, errs := Parse([]byte(workflow))
+	if len(errs) > 0 {
+		t.Fatalf("failed to parse workflow: %v", errs)
+	}
+
+	rule := NewAIActionUnsafeSandboxRule()
+	v := NewSyntaxTreeVisitor()
+	v.AddVisitor(rule)
+	if err := v.VisitTree(parsed); err != nil {
+		t.Fatalf("failed to visit tree: %v", err)
+	}
+
+	return rule.Errors()
+}
+
+func TestAIActionUnsafeSandbox_DetectsDangerFullAccessOnTheSandboxInput(t *testing.T) {
+	t.Parallel()
+
+	// codex-action defines danger-full-access as a value of the `sandbox` input:
+	// "Legacy sandbox mode for Codex. One of workspace-write, read-only or
+	// danger-full-access." It is NOT a documented safety-strategy value, so
+	// checking safety-strategy for it could never match a real configuration --
+	// while the input that actually carries it was never inspected.
+	workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: openai/codex-action@v1
+        with:
+          sandbox: danger-full-access
+`
+	if len(runUnsafeSandboxRule(t, workflow)) == 0 {
+		t.Fatal("sandbox: danger-full-access was not reported")
+	}
+}
+
+func TestAIActionUnsafeSandbox_SafeSandboxModesAreNotReported(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []string{"workspace-write", "read-only"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: openai/codex-action@v1
+        with:
+          sandbox: ` + mode + `
+`
+			if errs := runUnsafeSandboxRule(t, workflow); len(errs) != 0 {
+				t.Fatalf("sandbox: %s was reported: %s", mode, errs[0].Description)
+			}
+		})
+	}
+}
