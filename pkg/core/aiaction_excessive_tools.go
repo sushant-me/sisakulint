@@ -22,6 +22,8 @@ var aiExcessiveToolsUntrustedTriggers = map[string]bool{
 	"issues":              true,
 	"issue_comment":       true,
 	"discussion":          true,
+	"discussion_comment":  true, // PrivilegedTriggers: "Triggered by untrusted discussion comments"
+	"pull_request_review": true, // PrivilegedTriggers: "Review body is attacker-controlled"
 	"pull_request_target": true,
 	"workflow_run":        true,
 }

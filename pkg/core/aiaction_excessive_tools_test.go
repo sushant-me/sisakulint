@@ -112,3 +112,43 @@ jobs:
 		t.Fatalf("expected no errors for Bash tool with push trigger (trusted), got %d: %v", len(ruleErrors), ruleErrors)
 	}
 }
+
+func TestAIActionExcessiveTools_PrivilegedTriggersTheSetOmitted(t *testing.T) {
+	t.Parallel()
+
+	// PrivilegedTriggers classifies these as attacker-controlled --
+	// "Triggered by untrusted discussion comments" and "Review body is
+	// attacker-controlled" -- but this rule's own trigger set omitted them, so a
+	// workflow triggered only by one of these was not reported at all.
+	for _, trigger := range []string{"discussion_comment", "pull_request_review"} {
+		t.Run(trigger, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on:
+  ` + trigger + `:
+    types: [created]
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: --allowedTools "Bash,Read,Write,Edit"
+`
+			parsed, errs := Parse([]byte(workflow))
+			if len(errs) > 0 {
+				t.Fatalf("failed to parse workflow: %v", errs)
+			}
+			rule := NewAIActionExcessiveToolsRule()
+			v := NewSyntaxTreeVisitor()
+			v.AddVisitor(rule)
+			if err := v.VisitTree(parsed); err != nil {
+				t.Fatalf("failed to visit tree: %v", err)
+			}
+			if len(rule.Errors()) == 0 {
+				t.Fatalf("trigger %q was not treated as untrusted", trigger)
+			}
+		})
+	}
+}

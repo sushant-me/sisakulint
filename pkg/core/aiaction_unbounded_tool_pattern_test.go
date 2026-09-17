@@ -515,3 +515,35 @@ jobs:
 		})
 	}
 }
+
+func TestAIActionUnboundedToolPattern_PrivilegedTriggersTheSetOmitted(t *testing.T) {
+	t.Parallel()
+
+	// This rule reuses aiExcessiveToolsUntrustedTriggers, so the same omission
+	// applied here: a workflow triggered only by a review body or a discussion
+	// comment was invisible.
+	for name, trigger := range map[string]string{
+		"review body":        "pull_request_review",
+		"discussion comment": "discussion_comment",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on:
+  ` + trigger + `:
+    types: [created]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: --allowedTools "Read,Bash(gh issue edit:*)"
+`
+			if ruleErrors := runUnboundedToolPatternRule(t, workflow); len(ruleErrors) == 0 {
+				t.Fatalf("trigger %q was not treated as untrusted", trigger)
+			}
+		})
+	}
+}
