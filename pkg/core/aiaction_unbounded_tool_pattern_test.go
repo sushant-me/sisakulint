@@ -344,3 +344,67 @@ jobs:
 		})
 	}
 }
+
+func TestAIActionUnboundedToolPattern_ExactCommandWithoutWildcardIsNotUnbounded(t *testing.T) {
+	t.Parallel()
+
+	// Claude Code: "A rule with no `*` matches one exact command."
+	// `Bash(git push)` therefore allows the bare command and no arguments, so it
+	// cannot match an arbitrary ref; `Bash(git push:*)` can. Reporting the first
+	// as "matches any target" is a false positive.
+	for name, allow := range map[string]string{
+		"exact git push":      "Read,Bash(git push)",
+		"exact gh pr comment": "Read,Bash(gh pr comment)",
+		"exact gh issue edit": "Read,Bash(gh issue edit)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: --allowedTools "` + allow + `"
+`
+			if ruleErrors := runUnboundedToolPatternRule(t, workflow); len(ruleErrors) != 0 {
+				t.Fatalf("exact command %q reported as unbounded: %s", allow, ruleErrors[0].Description)
+			}
+		})
+	}
+}
+
+func TestAIActionUnboundedToolPattern_WildcardFormsAreStillReported(t *testing.T) {
+	t.Parallel()
+
+	// The two equivalent wildcard spellings must both still be findings.
+	for name, allow := range map[string]string{
+		"colon form": "Read,Bash(git push:*)",
+		"space form": "Read,Bash(git push *)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: --allowedTools "` + allow + `"
+`
+			if ruleErrors := runUnboundedToolPatternRule(t, workflow); len(ruleErrors) == 0 {
+				t.Fatalf("wildcard form %q was not reported", allow)
+			}
+		})
+	}
+}

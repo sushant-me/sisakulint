@@ -179,9 +179,20 @@ func findUnboundedMutatingCommands(claudeArgs string) []string {
 	seen := make(map[string]bool)
 
 	for _, entry := range aiBashToolEntryPattern.FindAllStringSubmatch(claudeArgs, -1) {
+		raw := strings.TrimSpace(entry[1])
+
+		// `*` を含まないルールは 1 つの完全一致コマンドにしか一致しない
+		// (Claude Code のドキュメント: "A rule with no `*` matches one exact
+		// command")。`Bash(git push)` が許可するのは引数なしの `git push` だけで、
+		// 任意の ref を許可するのは `Bash(git push:*)` の方である。
+		// これは「任意の対象に一致する許可」ではないので報告しない。
+		if !strings.Contains(raw, "*") {
+			continue
+		}
+
 		// Claude Code のワイルドカード表記 `:*` を取り除き、許可されている
 		// プレフィックスそのものを得る。
-		prefix := strings.TrimSuffix(strings.TrimSpace(entry[1]), ":*")
+		prefix := strings.TrimSuffix(raw, ":*")
 		prefix = strings.TrimSpace(prefix)
 
 		match := aiMutatingCommandPattern.FindStringSubmatch(prefix)

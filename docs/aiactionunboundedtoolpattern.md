@@ -37,6 +37,19 @@ grant is scoped to, which gives three distinguishable forms:
 | `Bash(gh issue edit:*)` | any issue in the repository |
 | `Bash(gh issue edit 1234:*)` | issue 1234 only |
 | `Bash(gh issue edit ${{ github.event.issue.number }}:*)` | the triggering issue only |
+| `Bash(gh issue edit)` | **only the bare command** — no arguments at all |
+
+The last row matters and is easy to misread. A rule with **no `*`** matches
+**one exact command**: the [Claude Code permission reference](https://code.claude.com/docs/en/permissions)
+states *"A rule with no `*` matches one exact command"*, and that `Bash(ls:*)`
+is *"an equivalent way to write a trailing wildcard"* — i.e. `Bash(ls:*)` and
+`Bash(ls *)` are the same rule, and neither is the same as `Bash(ls)`.
+
+So `Bash(git push)` permits the bare `git push` and **no arguments**, which
+cannot name an arbitrary ref, whereas `Bash(git push:*)` permits any ref. Only
+the wildcard form matches *any target*, so only the wildcard form is reported.
+Flagging the exact form as unbounded would be a false positive, and this rule
+does not do it.
 
 The first form is the finding. The workflow's prompt usually *says* to work on the
 issue that triggered the run, and the agent usually does — but the **permission**
