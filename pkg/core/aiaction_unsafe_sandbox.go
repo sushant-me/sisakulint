@@ -7,9 +7,13 @@ import (
 )
 
 // unsafeSandboxValues はサンドボックス保護を無効化する危険な safety-strategy の値。
+//
+// danger-full-access はここに含めない。codex-action が safety-strategy の値として
+// 定義しているのは drop-sudo / read-only / unprivileged-user / unsafe の 4 つで、
+// danger-full-access は別の入力（sandbox）の値である。到達しえない値を一覧に
+// 残すと、その値が書かれたときに「危険な設定」と誤って報告してしまう。
 var unsafeSandboxValues = []string{
 	"unsafe",
-	"danger-full-access", // documented for the `sandbox` input, not this one; kept defensively
 }
 
 // sandboxModeInputKeys は Codex のサンドボックスモードを選択する入力キー名。
@@ -90,10 +94,28 @@ func (r *AIActionUnsafeSandboxRule) VisitStep(node *ast.Step) error {
 	}
 
 	r.checkSafetyStrategy(node, action)
-	r.checkSandboxMode(node, action)
+
+	// `sandbox` は codex-action の入力である。他のアクションに書かれても
+	// そのアクションは読まないため、危険な設定として報告してはならない。
+	if aiIsCodexAction(action.Uses.Value) {
+		r.checkSandboxMode(node, action)
+	}
 	r.checkDangerouslySkipPermissions(node, action)
 
 	return nil
+}
+
+// aiIsCodexAction は uses が openai/codex-action を指すかを判定する。
+// プレフィックスの直後が '@'、'/'、または文字列終端であることも確認し、
+// "openai/codex-action-fork" のような別アクションを拾わない。
+func aiIsCodexAction(uses string) bool {
+	const prefix = "openai/codex-action"
+	lower := strings.ToLower(strings.TrimSpace(uses))
+	if !strings.HasPrefix(lower, prefix) {
+		return false
+	}
+	rest := lower[len(prefix):]
+	return rest == "" || rest[0] == '@' || rest[0] == '/'
 }
 
 // checkSafetyStrategy は safety-strategy 入力の値を検査する。

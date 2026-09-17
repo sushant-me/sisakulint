@@ -92,9 +92,13 @@ func TestAIActionUnboundedToolPattern_AllowsBoundedPatterns(t *testing.T) {
 	for name, allow := range map[string]string{
 		"expression target": "Read,Bash(gh issue edit ${{ github.event.issue.number }}:*)",
 		"literal target":    "Read,Bash(gh issue edit 1234:*)",
-		"named branch":      "Read,Bash(git push origin fix/issue-1:*)",
-		"label only":        "Read,Bash(gh issue edit 1234 --add-label:*)",
-		"read only":         "Read,Glob,Grep,Bash(gh issue view:*)",
+		// The exact form names the refspec and nothing else. The `:*` form does
+		// NOT bound it: `git push` takes several refspecs, so
+		// `git push origin fix/issue-1 other-branch` also matches. See
+		// TestAIActionUnboundedToolPattern_GitPushWildcardStillPermitsARefspec.
+		"named branch, exact": "Read,Bash(git push origin fix/issue-1)",
+		"label only":          "Read,Bash(gh issue edit 1234 --add-label:*)",
+		"read only":           "Read,Glob,Grep,Bash(gh issue view:*)",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -256,8 +260,12 @@ func TestAIActionUnboundedToolPattern_NamedTargetForTheSameCommandsIsAllowed(t *
 	// The other half of the test above: once the target is named, the same
 	// commands are bounded and must not be reported.
 	for name, allow := range map[string]string{
-		"git push with ref":        "Read,Bash(git push origin main:*)",
-		"git push with branch":     "Read,Bash(git push origin fix/issue-1:*)",
+		// The `:*` sibling of this entry is NOT bounded - `git push` takes
+		// several refspecs, so a further one can be appended. Only the exact
+		// form names the target.
+		"git push with ref": "Read,Bash(git push origin main)",
+		// Exact form: the refspec is the whole command, so no other can follow.
+		"git push with branch":     "Read,Bash(git push origin fix/issue-1)",
 		"gh api with endpoint":     "Read,Bash(gh api repos/o/r/issues/1:*)",
 		"gh issue with number":     "Read,Bash(gh issue comment 1234 --body:*)",
 		"gh pr review with number": "Read,Bash(gh pr review 42 --approve:*)",
@@ -545,5 +553,64 @@ jobs:
 				t.Fatalf("trigger %q was not treated as untrusted", trigger)
 			}
 		})
+	}
+}
+
+func TestAIActionUnboundedToolPattern_GitPushWildcardStillPermitsARefspec(t *testing.T) {
+	t.Parallel()
+
+	// `git push` accepts several refspecs, so a pattern that names one and then
+	// allows anything does not bound the target: it also matches
+	// `git push origin main other-branch`, which pushes other-branch. Naming a
+	// refspec in a `:*` pattern is therefore still an unbounded grant, and only
+	// the exact form (no `*`) names a target. This is the case the docs used to
+	// present as safe.
+	for name, allow := range map[string]string{
+		"named refspec + wildcard": "Read,Bash(git push origin main:*)",
+		"option value then remote": "Read,Bash(git push -o ci.skip origin:*)",
+		"remote only + wildcard":   "Read,Bash(git push origin:*)",
+		"bare push + wildcard":     "Read,Bash(git push:*)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: --allowedTools "` + allow + `"
+`
+			if ruleErrors := runUnboundedToolPatternRule(t, workflow); len(ruleErrors) == 0 {
+				t.Fatalf("git push pattern %q was not reported", allow)
+			}
+		})
+	}
+}
+
+func TestAIActionUnboundedToolPattern_GitPushExactFormIsBounded(t *testing.T) {
+	t.Parallel()
+
+	// The counterpart: with no wildcard the command is the whole grant, so no
+	// additional refspec can be appended.
+	workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: --allowedTools "Read,Bash(git push origin fix/issue-1)"
+`
+	if ruleErrors := runUnboundedToolPatternRule(t, workflow); len(ruleErrors) != 0 {
+		t.Fatalf("exact git push was reported: %s", ruleErrors[0].Description)
 	}
 }

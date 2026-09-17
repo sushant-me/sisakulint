@@ -139,21 +139,27 @@ The rule performs two-phase detection:
    trigger list, shared with [AI Action Excessive Tools]({{< ref "aiactionexcessivetools.md" >}})
    so the two rules cannot disagree about what "untrusted" means.
 2. **Step-level**: extracts each `Bash(...)` entry from `claude_args`, strips the
-   trailing `:*` wildcard to obtain the permitted prefix, and reports the entry
-   when the prefix stops at a mutating command with no target named.
+   trailing wildcard (`:*`, ` *`, or `*`) to obtain the permitted prefix, and
+   reports the entry when the prefix is an unbounded grant of a mutating
+   command. That covers two shapes: a prefix that ends at a mutating command
+   with **no target in it** (`Bash(gh issue edit:*)`), and a prefix that ends at
+   a **group** whose subcommands mutate (`Bash(gh:*)`, `Bash(gh pr:*)`,
+   `Bash(gh issue:*)`, `Bash(git:*)`). A group grant authorises every verb in
+   that group, so it is broader than naming one.
 
 Whether a target *is* named is command-aware, because the position of the target
 differs between commands:
 
 | pattern | why |
 |---|---|
-| `Bash(gh issue edit:*)` | no argument at all |
+| `Bash(gh issue edit:*)` | no target argument in the prefix; arguments may follow the `:*` |
 | `Bash(gh issue comment --body:*)` | the first argument is a flag, so no issue is named |
 | `Bash(gh api --method POST:*)` | the first argument is a flag, so no endpoint is named |
 | `Bash(git push origin:*)` | `origin` is the *remote*; the refspec is still open |
 | `Bash(gh issue edit 1234:*)` | bounded — the target is the first argument |
 | `Bash(gh api repos/o/r/issues/1:*)` | bounded — the endpoint is the first argument |
-| `Bash(git push origin fix/issue-1:*)` | bounded — both remote and refspec are named |
+| `Bash(git push origin fix/issue-1:*)` | **still unbounded** — `git push` takes several refspecs, so a further one can be appended |
+| `Bash(git push origin fix/issue-1)` | bounded — an exact match, so nothing can follow |
 
 The presence of an argument is not enough on its own, which is the distinction
 this rule has to make to be useful.
@@ -221,8 +227,10 @@ claude_args: --allowedTools "Read,Bash(gh issue edit ${{ github.event.issue.numb
 # target named literally
 claude_args: --allowedTools "Read,Bash(gh issue edit 1234:*)"
 
-# remote and refspec both named
-claude_args: --allowedTools "Read,Bash(git push origin fix/issue-1:*)"
+# remote and refspec both named, and nothing may follow: the exact form
+# `Read,Bash(git push origin fix/issue-1:*)` is NOT the bounded one - it also
+# matches `git push origin fix/issue-1 other-branch`, which pushes other-branch
+claude_args: --allowedTools "Read,Bash(git push origin fix/issue-1)"
 
 # endpoint named
 claude_args: --allowedTools "Read,Bash(gh api repos/o/r/issues/1:*)"

@@ -66,15 +66,17 @@ func aiTargetIsBounded(command, rest string) bool {
 	}
 
 	if strings.HasPrefix(command, "git push") {
-		// refspec が名指しされていなければ、エージェントは任意の ref を push できる。
-		// リモートだけの指定（git push origin）は限定にならない。
-		positional := 0
-		for _, field := range fields {
-			if !strings.HasPrefix(field, "-") {
-				positional++
-			}
-		}
-		return positional >= 2
+		// `git push` は refspec を複数受け取る。したがって refspec を 1 つ名指し
+		// したパターンでも、さらに別の refspec を追加できる:
+		//
+		//	Bash(git push origin main:*) は `git push origin main other-branch`
+		//	にも一致し、other-branch を push できてしまう。
+		//
+		// つまり git push では、ワイルドカードを含む形はすべて対象を限定して
+		// いない。対象を名指しできるのは完全一致（`*` を含まない形）だけで、
+		// それは呼び出し側が先に除外している。フラグやオプション値を数える
+		// 必要はない。
+		return false
 	}
 
 	// gh のコマンドは `gh <group> <verb> <target> [flags]` の形で、

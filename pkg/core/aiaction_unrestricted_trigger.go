@@ -77,7 +77,7 @@ func (r *AIActionUnrestrictedTriggerRule) VisitStep(node *ast.Step) error {
 	// 定義されているため、リストの要素に '*' が含まれていれば全ユーザーが
 	// トリガーできる。文字列全体が "*" である場合だけを見ると、
 	// "*,some-trusted-user" のような指定を取り逃がす。
-	for _, inputName := range aiUnrestrictedTriggerInputs {
+	for _, inputName := range aiUnrestrictedTriggerInputsFor(action.Uses.Value) {
 		val, exists := action.Inputs[inputName]
 		if !exists || val == nil || val.Value == nil {
 			continue
@@ -96,11 +96,45 @@ func (r *AIActionUnrestrictedTriggerRule) VisitStep(node *ast.Step) error {
 	return nil
 }
 
-// aiUnrestrictedTriggerInputs は「任意のユーザーを許可する」入力の名前。
-// アクションごとに名前が異なるため、両方を検査する。
-var aiUnrestrictedTriggerInputs = []string{
-	"allowed_non_write_users", // anthropics/claude-code-action
-	"allow-users",             // openai/codex-action
+// aiUnrestrictedTriggerInputs は、アクションごとに「任意のユーザーを許可する」
+// 入力の名前を対応づける。名前が違うだけでなく、入力を持たないアクションも
+// あるため、一覧ではなく対応表にしている。
+//
+// すべて action.yml で確認した事実にもとづく:
+//
+//	anthropics/claude-code-action      allowed_non_write_users, allowed_bots
+//	anthropics/claude-code-base-action なし
+//	openai/codex-action                allow-users, allow-bots
+//
+// 以前は両方の名前をすべてのアクションに対して検査していた。そのため
+// 入力を持たない claude-code-base-action に allowed_non_write_users が
+// 書かれていても報告してしまい、実際には誰も許可されていない設定を
+// 「全ユーザーが実行できる」と誤って伝えていた。
+//
+// 対応表にないアクション（github/copilot-swe-agent、openai/openai-actions）は
+// action.yml を取得して確認できていないため、推測せず何も報告しない。
+// 誤検知を避ける側に倒した判断であり、確認でき次第ここに追加する。
+var aiUnrestrictedTriggerInputs = map[string][]string{
+	"anthropics/claude-code-action":      {"allowed_non_write_users"},
+	"anthropics/claude-code-base-action": {},
+	"openai/codex-action":                {"allow-users"},
+}
+
+// aiUnrestrictedTriggerInputsFor は uses に対応する入力名を返す。
+// 未知のアクションには nil を返し、呼び出し側は何も報告しない。
+func aiUnrestrictedTriggerInputsFor(uses string) []string {
+	lower := strings.ToLower(strings.TrimSpace(uses))
+	for prefix, names := range aiUnrestrictedTriggerInputs {
+		if strings.HasPrefix(lower, prefix) {
+			rest := lower[len(prefix):]
+			// プレフィックスの直後が '@'、'/'、または文字列終端であることを
+			// 確認し、"openai/codex-action-x" のような別アクションを拾わない。
+			if rest == "" || rest[0] == '@' || rest[0] == '/' {
+				return names
+			}
+		}
+	}
+	return nil
 }
 
 // aiAllowsEveryUser は、カンマ区切りの許可リストが全ユーザーを許可するかを判定する。

@@ -44,8 +44,17 @@ jobs:
 	}
 }
 
-func TestAIActionUnsafeSandbox_DetectsDangerFullAccess(t *testing.T) {
+func TestAIActionUnsafeSandbox_DangerFullAccessIsNotASafetyStrategyValue(t *testing.T) {
 	t.Parallel()
+
+	// codex-action documents safety-strategy as drop-sudo / read-only /
+	// unprivileged-user / unsafe. danger-full-access is a value of the separate
+	// `sandbox` input, so a safety-strategy carrying it is not a configuration
+	// the action accepts. Reporting it would tell a maintainer that a dangerous
+	// sandbox setting is in force when the action would reject the value.
+	//
+	// The value IS reported on the input that does define it - see
+	// TestAIActionUnsafeSandbox_DetectsDangerFullAccessOnTheSandboxInput.
 	rule := NewAIActionUnsafeSandboxRule()
 
 	workflow := `
@@ -70,12 +79,8 @@ jobs:
 		t.Fatalf("failed to visit tree: %v", err)
 	}
 
-	ruleErrors := rule.Errors()
-	if len(ruleErrors) == 0 {
-		t.Fatal("expected error for safety-strategy: danger-full-access, got none")
-	}
-	if !strings.Contains(ruleErrors[0].Description, "danger-full-access") {
-		t.Errorf("expected error to mention danger-full-access, got: %s", ruleErrors[0].Description)
+	if ruleErrors := rule.Errors(); len(ruleErrors) != 0 {
+		t.Fatalf("safety-strategy: danger-full-access was reported: %s", ruleErrors[0].Description)
 	}
 }
 
