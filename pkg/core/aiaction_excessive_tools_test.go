@@ -152,3 +152,67 @@ jobs:
 		})
 	}
 }
+
+func TestAIActionExcessiveTools_ClaudeCodeBaseActionIsCovered(t *testing.T) {
+	t.Parallel()
+
+	// claude-code-base-action is the lower-level action claude-code-action is
+	// built on and takes the same claude_args input, but it was absent from
+	// knownAIActionPrefixes -- so this exact configuration, found in a real
+	// workflow with contents/issues/pull-requests write, was reported by no AI
+	// rule at all.
+	workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: anthropics/claude-code-base-action@v1
+        with:
+          claude_args: --allowedTools "Bash,Read,Write,Edit"
+`
+	parsed, errs := Parse([]byte(workflow))
+	if len(errs) > 0 {
+		t.Fatalf("failed to parse workflow: %v", errs)
+	}
+	rule := NewAIActionExcessiveToolsRule()
+	v := NewSyntaxTreeVisitor()
+	v.AddVisitor(rule)
+	if err := v.VisitTree(parsed); err != nil {
+		t.Fatalf("failed to visit tree: %v", err)
+	}
+	if len(rule.Errors()) == 0 {
+		t.Fatal("claude-code-base-action granting Bash/Write/Edit was not reported")
+	}
+}
+
+func TestKnownAIActionPrefix_DoesNotOvermatch(t *testing.T) {
+	t.Parallel()
+
+	// Adding claude-code-base-action must not make the boundary check looser:
+	// an unrelated action whose name merely starts with a known one is still out.
+	for _, uses := range []string{
+		"anthropics/claude-code-action-malicious@v1",
+		"openai/codex-action-fake@v1",
+		"anthropics/claude-code-base-action-fork@v1",
+		"evil/anthropics/claude-code-action@v1",
+	} {
+		if isKnownAIActionPrefix(uses) {
+			t.Errorf("isKnownAIActionPrefix(%q) = true; want false", uses)
+		}
+	}
+	for _, uses := range []string{
+		"anthropics/claude-code-base-action@v1",
+		"anthropics/claude-code-base-action/sub@v1",
+		"anthropics/claude-code-action@v1",
+	} {
+		if !isKnownAIActionPrefix(uses) {
+			t.Errorf("isKnownAIActionPrefix(%q) = false; want true", uses)
+		}
+	}
+}

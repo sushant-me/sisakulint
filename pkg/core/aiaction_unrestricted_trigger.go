@@ -9,6 +9,12 @@ import (
 // knownAIActionPrefixes は検査対象の AI エージェントアクションのプレフィックスリスト
 var knownAIActionPrefixes = []string{
 	"anthropics/claude-code-action",
+	// The lower-level action claude-code-action is built on. It takes the same
+	// claude_args input, so every rule that reads claude_args applies to it
+	// equally -- but it was absent from this list, so no AI rule saw it. Found
+	// used in a real workflow with contents/issues/pull-requests write and
+	// Bash/Write/Edit granted on an untrusted trigger.
+	"anthropics/claude-code-base-action",
 	"github/copilot-swe-agent",
 	"openai/openai-actions",
 	"openai/codex-action",
