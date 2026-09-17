@@ -408,3 +408,75 @@ jobs:
 		})
 	}
 }
+
+func TestAIActionUnboundedToolPattern_GroupWideGrantIsDetected(t *testing.T) {
+	t.Parallel()
+
+	// A grant naming a *group* rather than a subcommand authorises every verb in
+	// that group, so `Bash(gh pr:*)` permits `gh pr merge`, `gh pr close` and
+	// `gh pr edit`, and `Bash(git:*)` permits `git push`. These are broader than
+	// the per-verb form the rule already caught, and were previously missed
+	// entirely because a verb was required.
+	for name, allow := range map[string]string{
+		"all of gh":      "Read,Bash(gh:*)",
+		"gh pr group":    "Read,Bash(gh pr:*)",
+		"gh issue group": "Read,Bash(gh issue:*)",
+		"all of git":     "Read,Bash(git:*)",
+		"gh release":     "Read,Bash(gh release:*)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: --allowedTools "` + allow + `"
+`
+			if ruleErrors := runUnboundedToolPatternRule(t, workflow); len(ruleErrors) == 0 {
+				t.Fatalf("group-wide grant %q was not reported", allow)
+			}
+		})
+	}
+}
+
+func TestAIActionUnboundedToolPattern_ReadOnlyGroupsAreNotReported(t *testing.T) {
+	t.Parallel()
+
+	// Widening detection to whole groups must not swallow read-only ones: a
+	// hardened configuration still needs `gh search`, `gh pr view` and the like.
+	for name, allow := range map[string]string{
+		"gh search":     "Read,Bash(gh search:*)",
+		"gh pr view":    "Read,Bash(gh pr view:*)",
+		"gh pr diff":    "Read,Bash(gh pr diff:*)",
+		"gh issue view": "Read,Bash(gh issue view:*)",
+		"git log":       "Read,Bash(git log:*)",
+		"git diff":      "Read,Bash(git diff:*)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			workflow := `
+on:
+  issues:
+    types: [opened]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_args: --allowedTools "` + allow + `"
+`
+			if ruleErrors := runUnboundedToolPatternRule(t, workflow); len(ruleErrors) != 0 {
+				t.Fatalf("read-only grant %q reported as unbounded: %s", allow, ruleErrors[0].Description)
+			}
+		})
+	}
+}

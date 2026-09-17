@@ -34,6 +34,19 @@ var aiMutatingCommandPattern = regexp.MustCompile(
 		`lock|unlock|pin|unpin|review|ready|clone|upload)` +
 		`|gh\s+api|git\s+push)(\s+.*)?$`)
 
+// aiMutatingGroupPattern は、サブコマンドではなくグループ全体を許可する
+// プレフィックスに一致する。
+//
+//	gh pr:*    -> gh pr merge / close / edit / review をまとめて許可する
+//	gh:*       -> gh のすべてのサブコマンドを許可する
+//	git:*      -> git push を含むすべての git コマンドを許可する
+//
+// これらは個別の動詞を名指しした許可より広い。動詞を要求する
+// aiMutatingCommandPattern では拾えないため、別に判定する。
+// `gh search:*` や `gh pr view:*` のような読み取り専用のものは含めない。
+var aiMutatingGroupPattern = regexp.MustCompile(
+	`^(gh(?:\s+(?:issue|pr|label|release|workflow|repo|run))?|git)$`)
+
 // aiTargetIsBounded は、許可プレフィックスが対象を名指ししているかを判定する。
 //
 // 引数の有無だけでは決まらない。コマンドごとに「対象」が何番目のトークンかを
@@ -194,6 +207,15 @@ func findUnboundedMutatingCommands(claudeArgs string) []string {
 		// プレフィックスそのものを得る。
 		prefix := strings.TrimSuffix(raw, ":*")
 		prefix = strings.TrimSpace(prefix)
+
+		// グループ全体の許可は、動詞を名指ししていなくても変更系を含む。
+		if g := aiMutatingGroupPattern.FindStringSubmatch(prefix); g != nil {
+			if !seen[g[1]] {
+				seen[g[1]] = true
+				found = append(found, g[1])
+			}
+			continue
+		}
 
 		match := aiMutatingCommandPattern.FindStringSubmatch(prefix)
 		if match == nil {

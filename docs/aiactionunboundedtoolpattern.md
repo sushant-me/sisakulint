@@ -38,8 +38,19 @@ grant is scoped to, which gives three distinguishable forms:
 | `Bash(gh issue edit 1234:*)` | issue 1234 only |
 | `Bash(gh issue edit ${{ github.event.issue.number }}:*)` | the triggering issue only |
 | `Bash(gh issue edit)` | **only the bare command** — no arguments at all |
+| `Bash(gh issue:*)` | **every** `gh issue` subcommand — edit, close, reopen, comment |
+| `Bash(gh:*)` | **every** `gh` command, `gh api` and `gh pr merge` included |
+| `Bash(git:*)` | **every** `git` command, `git push` included |
 
-The last row matters and is easy to misread. A rule with **no `*`** matches
+Naming a **group** rather than a subcommand is the broadest form of all, and it
+is easy to miss precisely because it looks tidy: `Bash(gh pr:*)` reads as "gh
+pull-request commands" while actually authorising `gh pr merge`, `gh pr close`
+and `gh pr edit` on any pull request, and `Bash(git:*)` authorises `git push` to
+any ref. These are reported too. Read-only groups and subcommands are not:
+`gh search`, `gh pr view`, `gh pr diff`, `git log` and `git diff` are what a
+hardened configuration still needs.
+
+The `Bash(gh issue edit)` row matters and is easy to misread. A rule with **no `*`** matches
 **one exact command**: the [Claude Code permission reference](https://code.claude.com/docs/en/permissions)
 states *"A rule with no `*` matches one exact command"*, and that `Bash(ls:*)`
 is *"an equivalent way to write a trailing wildcard"* — i.e. `Bash(ls:*)` and
